@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ISS RADIO MONITOR & FOOTPRINT</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+        
+        :root { --accent: #00d2ff; --bg: #0a0b0e; --card: #15191e; --radio-green: #39ff14; }
+        body { background: var(--bg); color: #fff; font-family: 'JetBrains Mono', monospace; margin: 0; padding: 15px; font-size: 14px; }
+        
+        .layout { max-width: 1000px; margin: 0 auto; }
+        header { padding: 10px 0; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+        
+        #map { height: 400px; width: 100%; border-radius: 8px; border: 1px solid #222; margin-bottom: 15px; }
+        
+        .dashboard { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        @media (max-width: 768px) { .dashboard { grid-template-columns: 1fr; } }
+
+        .card { background: var(--card); border: 1px solid #222; padding: 15px; border-radius: 6px; }
+        .label { font-size: 0.65rem; color: #666; text-transform: uppercase; letter-spacing: 1px; }
+        .value { font-size: 1.5rem; font-weight: bold; color: var(--accent); margin: 5px 0; display: block; }
+
+        /* Stile Lista Frequenze */
+        .radio-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.75rem; }
+        .radio-table th { text-align: left; color: var(--radio-green); border-bottom: 1px solid #333; padding: 5px 0; }
+        .radio-table td { padding: 8px 0; border-bottom: 1px solid #222; }
+        .freq { color: var(--radio-green); font-weight: bold; }
+
+        .footprint-info { color: #888; font-size: 0.7rem; margin-top: 5px; }
+        .live-dot { height: 8px; width: 8px; background: var(--radio-green); border-radius: 50%; display: inline-block; margin-right: 5px; box-shadow: 0 0 10px var(--radio-green); }
+    </style>
+</head>
+<body>
+
+<div class="layout">
+    <header>
+        <div>📡 ISS_SIGNAL_OPERATIONS</div>
+        <div id="utc-time" style="font-size: 0.8rem; opacity: 0.6;">--:--:--</div>
+    </header>
+
+    <div id="map"></div>
+
+    <div class="dashboard">
+        <div class="card" style="border-top: 3px solid var(--radio-green);">
+            <span class="label"><span class="live-dot"></span>ARISS Radio Frequencies</span>
+            <table class="radio-table">
+                <thead>
+                    <tr>
+                        <th>SERVIZIO</th>
+                        <th>FREQUENZA (DOWNLINK)</th>
+                        <th>MODO</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Voce (Astronauti)</td>
+                        <td class="freq">145.800 MHz</td>
+                        <td>FM</td>
+                    </tr>
+                    <tr>
+                        <td>SSTV (Immagini)</td>
+                        <td class="freq">145.800 MHz</td>
+                        <td>FM / PD120</td>
+                    </tr>
+                    <tr>
+                        <td>Ripetitore V/U</td>
+                        <td class="freq">437.800 MHz</td>
+                        <td>FM / Subtone</td>
+                    </tr>
+                    <tr>
+                        <td>Packet Radio/APRS</td>
+                        <td class="freq">145.825 MHz</td>
+                        <td>1200 AFSK</td>
+                    </tr>
+                    <tr>
+                        <td>Digital TV (HamTV)</td>
+                        <td class="freq">2395.000 MHz</td>
+                        <td>DVB-S2</td>
+                    </tr>
+                </tbody>
+            </table>
+            <p class="footprint-info">NB: I segnali sono udibili solo quando la tua posizione è dentro il cerchio sulla mappa.</p>
+        </div>
+
+        <div class="card">
+            <span class="label">Copertura Radio Reale</span>
+            <span class="value" id="footprint-val">~ 2,200 km</span>
+            <p style="font-size: 0.85rem; color: #ccc;">Il raggio di copertura dipende dall'altezza orbitale. Attualmente la stazione copre un'area di circa <b>15 milioni di km²</b>.</p>
+            
+            <div style="margin-top: 20px;">
+                <span class="label">Dati Orbita</span>
+                <div style="display: flex; gap: 20px; margin-top: 10px;">
+                    <div>
+                        <span style="display:block; font-size: 0.7rem; color: #555;">VELOCITÀ</span>
+                        <span id="speed-val" style="color: var(--accent); font-weight: bold;">--</span>
+                    </div>
+                    <div>
+                        <span style="display:block; font-size: 0.7rem; color: #555;">ALTEZZA</span>
+                        <span id="alt-val" style="color: var(--accent); font-weight: bold;">--</span>
+                    </div>
+                    <div>
+                        <span style="display:block; font-size: 0.7rem; color: #555;">SOLE</span>
+                        <span id="sun-val" style="color: var(--accent); font-weight: bold;">--</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    // Inizializza mappa scura
+    const map = L.map('map', { zoomControl: false }).setView([0, 0], 2);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
+
+    // Marker stazione
+    const marker = L.circleMarker([0, 0], { radius: 5, color: '#fff', fillOpacity: 1 }).addTo(map);
+    
+    // CERCHIO DI COPERTURA (Footprint)
+    // Lo stile è azzurro semitrasparente come i radar militari
+    const footprint = L.circle([0, 0], {
+        radius: 2200000, // Circa 2200km raggio medio
+        color: '#00d2ff',
+        weight: 1,
+        fillColor: '#00d2ff',
+        fillOpacity: 0.1
+    }).addTo(map);
+
+    async function updateData() {
+        try {
+            const res = await fetch('https://api.wheretheiss.at/v1/satellites/25544');
+            const data = await res.json();
+            
+            const pos = [data.latitude, data.longitude];
+            
+            // Aggiorna posizione mappa
+            marker.setLatLng(pos);
+            footprint.setLatLng(pos);
+            map.panTo(pos);
+
+            // Calcolo dinamico del raggio di copertura (formula semplificata basata sull'altezza)
+            // Raggio = acos(R_terra / (R_terra + altezza)) * R_terra
+            const R_terra = 6371;
+            const raggioKm = Math.acos(R_terra / (R_terra + data.altitude)) * R_terra;
+            footprint.setRadius(raggioKm * 1000); // Imposta in metri
+
+            // UI Update
+            document.getElementById('speed-val').innerText = Math.round(data.velocity).toLocaleString() + " km/h";
+            document.getElementById('alt-val').innerText = data.altitude.toFixed(1) + " km";
+            document.getElementById('sun-val').innerText = data.visibility === 'daylight' ? "SÌ" : "NO";
+            document.getElementById('footprint-val').innerText = "~ " + Math.round(raggioKm).toLocaleString() + " km";
+            document.getElementById('utc-time').innerText = new Date().toUTCString().split(' ')[4] + " UTC";
+
+        } catch (e) {
+            console.error("Connessione API persa.");
+        }
+    }
+
+    setInterval(updateData, 4000);
+    updateData();
+</script>
+
+</body>
+</html>
